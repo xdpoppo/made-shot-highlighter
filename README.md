@@ -38,8 +38,8 @@ https://universe.roboflow.com/queenmary/basketball-poeple-rin/browse
 
 ## Project Website
 
-*(Add your portfolio site link once it's published.)*
+
 
 ## Contact
 
-Hugo — *(add your email here)*
+Hugo — *hugolinnelson@gmail.com*
