@@ -171,7 +171,15 @@ def detect(source, weights=DEFAULT_WEIGHTS, conf=0.12, device="mps", out_dir=Non
            cooldown_s=1.5, gap_s=0.8, min_above=3, rim_alpha=0.15, rim_max_stale_s=2.0,
            below_factor=0.4, up_factor=0.7, down_factor=2.0, above_factor=1.8,
            interp_gap_s=0.5, imgsz=None, verbose=True,
-           rim_source="rfdetr", rim_weights=RFDETR_WEIGHTS, rim_stride=6, rim_conf=0.4):
+           rim_source="rfdetr", rim_weights=RFDETR_WEIGHTS, rim_stride=6, rim_conf=0.4,
+           progress_cb=None, target_fps=None):
+    """progress_cb, if given, is called periodically as progress_cb(frames_done, total_frames)
+    during the (slow) per-frame detection pass, so a caller can show a progress bar/ETA.
+
+    target_fps, if given, decimates the video to roughly that analysis rate (e.g. 24) by
+    skipping frames with a cheap cap.grab() (no decode/inference) instead of running the
+    detectors on every native frame — the main lever for wall-clock speed on high-fps
+    (60fps) source video. None (default) analyzes every frame, unchanged from before."""
     import cv2
     from ultralytics import YOLO
 
@@ -180,9 +188,14 @@ def detect(source, weights=DEFAULT_WEIGHTS, conf=0.12, device="mps", out_dir=Non
     cap = cv2.VideoCapture(source)
     fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
     W = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    cooldown_frames = cooldown_s * fps
-    gap_frames = gap_s * fps
-    rim_max_stale = rim_max_stale_s * fps
+    native_total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or None
+    stride = max(1, round(fps / target_fps)) if target_fps else 1
+    effective_fps = fps / stride
+    total_frames = (native_total // stride) if native_total else None
+    progress_every = max(1, (total_frames or 1000) // 200)  # ~200 callbacks over the whole video
+    cooldown_frames = cooldown_s * effective_fps
+    gap_frames = gap_s * effective_fps
+    rim_max_stale = rim_max_stale_s * effective_fps
 
     rf_model = None
     if rim_source == "rfdetr":
@@ -204,36 +217,58 @@ def detect(source, weights=DEFAULT_WEIGHTS, conf=0.12, device="mps", out_dir=Non
     # gap-fill the ball trajectory before judging makes — the tracking recipe
     # ported from the 2025-Hugo-Basketball-Analysis BallTracker.
     ball_hist = deque(maxlen=90)
-    ball_raw = []   # per frame: [x1,y1,x2,y2] or None
-    rim_raw = []    # per frame: [x1,y1,x2,y2] or None
+    ball_raw = []     # per sample: [x1,y1,x2,y2] or None
+    rim_raw = []      # per sample: [x1,y1,x2,y2] or None
+    frame_no_seq = []  # native frame number each sample corresponds to (for accurate timing)
+
+    frame_period = 1.0 / effective_fps  # seconds per analyzed frame
+    last_rim_frame = -1e9  # frame index where rim was last detected
+    rim_skip_threshold_s = 3.0  # skip ball inference if rim absent longer than this
 
     idx = 0
+    frame_no = 0
+    skip = stride - 1
     while True:
         ret, frame = cap.read()
         if not ret:
             break
-        r = model.predict(source=frame, conf=conf, device=device, verbose=False, imgsz=imgsz)[0]
 
-        if len(ball_hist) >= 2:
-            (lf, x1, y1), (_, x0, y0) = ball_hist[-1], ball_hist[-2]
-            pred = (x1 + (x1 - x0), y1 + (y1 - y0))
-        elif ball_hist:
-            lf, x1, y1 = ball_hist[-1]
-            pred = (x1, y1)
-        else:
-            lf, pred = idx, None
-        gap = max(1, idx - lf)
-        dyn = min(600, 100 + 60 * gap)
-        ball_box, local_rim_box = _pick_centers(r.boxes, names, prev_ball=pred,
-                                                max_jump=dyn, ball_hist=ball_hist)
-
+        # Cheap rim-only check every rim_stride frames (rfdetr mode). This also
+        # tells us whether the ball model is even worth running: with no rim in
+        # view a make is impossible anyway (pass 2 requires rim is not None),
+        # so once the rim's been gone a while (dead time: timeouts, replays,
+        # crowd shots) skip the expensive ball YOLO until it's back.
+        skip_ball = False
         if rf_model is not None:
-            # Only run the (heavier) RF-DETR model every `rim_stride` frames;
-            # _smooth_rim holds the last known box across the skipped frames.
-            rim_box = _rfdetr_rim_box(rf_model, frame, rim_conf) \
-                if idx % rim_stride == 0 else None
+            if idx % rim_stride == 0:
+                rim_box = _rfdetr_rim_box(rf_model, frame, rim_conf)
+                if rim_box is not None:
+                    last_rim_frame = idx
+            else:
+                rim_box = None
+            rim_absent_s = (idx - last_rim_frame) * frame_period
+            skip_ball = rim_absent_s > rim_skip_threshold_s
         else:
-            rim_box = local_rim_box
+            rim_box = None  # filled in from the ball model's own rim class below
+
+        if skip_ball:
+            ball_box = None
+        else:
+            r = model.predict(source=frame, conf=conf, device=device, verbose=False, imgsz=imgsz)[0]
+            if len(ball_hist) >= 2:
+                (lf, x1, y1), (_, x0, y0) = ball_hist[-1], ball_hist[-2]
+                pred = (x1 + (x1 - x0), y1 + (y1 - y0))
+            elif ball_hist:
+                lf, x1, y1 = ball_hist[-1]
+                pred = (x1, y1)
+            else:
+                lf, pred = idx, None
+            gap = max(1, idx - lf)
+            dyn = min(600, 100 + 60 * gap)
+            ball_box, local_rim_box = _pick_centers(r.boxes, names, prev_ball=pred,
+                                                    max_jump=dyn, ball_hist=ball_hist)
+            if rf_model is None:
+                rim_box = local_rim_box
 
         if ball_box is not None:
             cx = (ball_box[0] + ball_box[2]) / 2
@@ -241,7 +276,16 @@ def detect(source, weights=DEFAULT_WEIGHTS, conf=0.12, device="mps", out_dir=Non
             ball_hist.append((idx, cx, cy))
         ball_raw.append(list(ball_box) if ball_box is not None else None)
         rim_raw.append(list(rim_box) if rim_box is not None else None)
+        frame_no_seq.append(frame_no)
         idx += 1
+        if progress_cb is not None and (idx % progress_every == 0 or idx == total_frames):
+            progress_cb(idx, total_frames)
+
+        frame_no += 1
+        for _ in range(skip):
+            if not cap.grab():
+                break
+            frame_no += 1
 
     cap.release()
     n = idx
@@ -252,9 +296,9 @@ def detect(source, weights=DEFAULT_WEIGHTS, conf=0.12, device="mps", out_dir=Non
     # simpler jump filter on top backfires — after an occlusion it can anchor to
     # a phantom (a ref, a shoe) and then delete the *real* ball for being "far"
     # from that phantom, destroying the very below-rim sample a make needs.
-    max_gap = int(round(interp_gap_s * fps))  # only bridge short occlusions
+    max_gap = int(round(interp_gap_s * effective_fps))  # only bridge short occlusions
     ball_seq = _interpolate_boxes(ball_raw, max_gap)
-    rim_seq = _smooth_rim(rim_raw, rim_alpha, int(round(rim_max_stale_s * fps)))
+    rim_seq = _smooth_rim(rim_raw, rim_alpha, int(round(rim_max_stale_s * effective_fps)))
 
     # ---- Pass 2: make logic over the smoothed trajectory ----
     above_frames = deque()   # recent frame indices where the ball was ABOVE the rim
@@ -294,10 +338,12 @@ def detect(source, weights=DEFAULT_WEIGHTS, conf=0.12, device="mps", out_dir=Non
             # won't pair with an unrelated "below" detection into a fake make.
             last_make_frame = i
             above_frames.clear()
-            makes.append({"frame": i, "time": i / fps, "zone": zone,
+            native_frame = frame_no_seq[i]
+            t = native_frame / fps
+            makes.append({"frame": native_frame, "time": t, "zone": zone,
                           "ball": bb, "rim": rim})
             if verbose:
-                print(f"  MAKE @ frame {i} (t={i / fps:.2f}s)")
+                print(f"  MAKE @ frame {native_frame} (t={t:.2f}s)")
 
     # ---- Pass 3: re-read only the make frames to save annotated thumbnails ----
     if out_dir and makes:
@@ -351,9 +397,13 @@ if __name__ == "__main__":
                     help="path to the RF-DETR checkpoint when --rim-source=rfdetr")
     ap.add_argument("--rim-stride", type=int, default=6, dest="rim_stride",
                     help="run the RF-DETR rim model every N frames (holds position in between)")
+    ap.add_argument("--target-fps", type=float, default=None, dest="target_fps",
+                    help="decimate analysis to roughly this rate (e.g. 24) for faster "
+                         "processing of high-fps (60fps) source video; default analyzes every frame")
     args = ap.parse_args()
     detect(args.source, weights=args.weights, conf=args.conf, device=args.device,
            out_dir=args.out, cooldown_s=args.cooldown_s, gap_s=args.gap_s,
            min_above=args.min_above, above_factor=args.above_factor,
            interp_gap_s=args.interp_gap_s, imgsz=args.imgsz,
-           rim_source=args.rim_source, rim_weights=args.rim_weights, rim_stride=args.rim_stride)
+           rim_source=args.rim_source, rim_weights=args.rim_weights, rim_stride=args.rim_stride,
+           target_fps=args.target_fps)

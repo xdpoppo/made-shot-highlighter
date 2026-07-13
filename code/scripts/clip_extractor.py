@@ -72,6 +72,67 @@ def extract_all(source, makes, out_dir, pre=3.0, post=3.0):
     return paths
 
 
+def _has_audio(path):
+    if not _FFMPEG:
+        return False
+    probe = subprocess.run(
+        [_FFMPEG, "-i", path], stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True,
+    )
+    return "Audio:" in probe.stderr
+
+
+def concat_clips(clip_paths, out_path):
+    """Stitch already-cut clips into one highlight reel, in order."""
+    if not clip_paths:
+        return None
+    os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
+
+    if _FFMPEG:
+        # Clips cut from a source with no audio track are video-only; mapping a
+        # nonexistent [i:a:0] stream makes ffmpeg exit nonzero, so check first.
+        has_audio = all(_has_audio(p) for p in clip_paths)
+        n = len(clip_paths)
+        inputs = []
+        for p in clip_paths:
+            inputs += ["-i", p]
+        if has_audio:
+            filter_complex = "".join(f"[{i}:v:0][{i}:a:0]" for i in range(n)) + f"concat=n={n}:v=1:a=1[outv][outa]"
+            cmd = [_FFMPEG, "-y", *inputs, "-filter_complex", filter_complex,
+                   "-map", "[outv]", "-map", "[outa]",
+                   "-c:v", "libx264", "-preset", "veryfast", "-c:a", "aac",
+                   "-loglevel", "error", out_path]
+        else:
+            filter_complex = "".join(f"[{i}:v:0]" for i in range(n)) + f"concat=n={n}:v=1:a=0[outv]"
+            cmd = [_FFMPEG, "-y", *inputs, "-filter_complex", filter_complex,
+                   "-map", "[outv]",
+                   "-c:v", "libx264", "-preset", "veryfast",
+                   "-loglevel", "error", out_path]
+        subprocess.run(cmd, check=True)
+        return out_path
+
+    _concat_opencv(clip_paths, out_path)
+    return out_path
+
+
+def _concat_opencv(clip_paths, out_path):
+    import cv2
+    cap0 = cv2.VideoCapture(clip_paths[0])
+    fps = cap0.get(cv2.CAP_PROP_FPS) or 30.0
+    W = int(cap0.get(cv2.CAP_PROP_FRAME_WIDTH))
+    H = int(cap0.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    cap0.release()
+    writer = cv2.VideoWriter(out_path, cv2.VideoWriter_fourcc(*"mp4v"), fps, (W, H))
+    for p in clip_paths:
+        cap = cv2.VideoCapture(p)
+        while True:
+            ok, frame = cap.read()
+            if not ok:
+                break
+            writer.write(frame)
+        cap.release()
+    writer.release()
+
+
 if __name__ == "__main__":
     import argparse
     ap = argparse.ArgumentParser()

@@ -1,2 +1,7 @@
 ultralytics
 opencv-python
+rfdetr
+fastapi
+uvicorn[standard]
+python-multipart
+imageio-ffmpeg

@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Huge Highlights</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="glow"></div>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="brand-mark"></span>
+    <span class="brand-name">Huge Highlights</span>
+  </div>
+  <div class="tagline">Automatic made-shot detection for basketball footage</div>
+</header>
+
+<main>
+
+  <section id="upload-screen" class="screen active">
+    <div class="hero">
+      <h1>Turn full games<br>into highlight reels.</h1>
+      <p>Drop in raw game footage. Every made shot gets detected, clipped, and stitched into one reel automatically.</p>
+    </div>
+
+    <div id="dropzone" class="dropzone">
+      <input id="file-input" type="file" accept="video/mp4,video/quicktime,video/x-msvideo,video/x-matroska" hidden>
+      <div class="dropzone-icon">
+        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M12 16V4M12 4L7 9M12 4L17 9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M4 16V18C4 19.1046 4.89543 20 6 20H18C19.1046 20 20 19.1046 20 18V16" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </div>
+      <div class="dropzone-title">Drop your game video here</div>
+      <div class="dropzone-sub">or click to browse &middot; MP4, MOV, AVI, MKV &middot; up to 4GB</div>
+    </div>
+  </section>
+
+  <section id="progress-screen" class="screen">
+    <div class="progress-card">
+      <div class="progress-stage" id="stage-label">Scanning footage</div>
+      <div class="progress-bar-track">
+        <div class="progress-bar-fill" id="progress-fill"></div>
+      </div>
+      <div class="progress-meta">
+        <span id="frame-counter">Frame 0 / 0</span>
+        <span id="eta-counter">ETA --</span>
+      </div>
+    </div>
+  </section>
+
+  <section id="results-screen" class="screen">
+    <div class="results-header">
+      <div class="stat-row">
+        <div class="stat">
+          <div class="stat-value" id="stat-makes">0</div>
+          <div class="stat-label">Made shots found</div>
+        </div>
+      </div>
+      <button id="new-video-btn" class="btn-ghost">Analyze another video</button>
+    </div>
+
+    <div id="reel-block" class="block hidden">
+      <div class="block-title">Highlight Reel</div>
+      <video id="reel-video" controls></video>
+      <a id="reel-download" class="btn-primary" download>Download full reel</a>
+    </div>
+
+    <div id="clips-block" class="block hidden">
+      <div class="block-title">Individual Clips</div>
+      <div id="clips-grid" class="clips-grid"></div>
+    </div>
+
+    <div id="empty-state" class="empty-state hidden">No made shots were detected in this video.</div>
+  </section>
+
+  <section id="error-screen" class="screen">
+    <div class="error-card">
+      <div class="error-title">Something went wrong</div>
+      <div class="error-detail" id="error-detail"></div>
+      <button id="error-retry-btn" class="btn-ghost">Try again</button>
+    </div>
+  </section>
+
+</main>
+
+<script src="app.js"></script>
+</body>
+</html>

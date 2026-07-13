@@ -34,3 +34,8 @@ ultralytics==8.4.90
 ultralytics-thop==2.0.20
 urllib3==2.6.3
 zipp==3.23.1
+rfdetr==1.3.0
+fastapi==0.128.8
+uvicorn==0.39.0
+python-multipart==0.0.20
+imageio-ffmpeg==0.6.0
