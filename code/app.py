@@ -3,13 +3,14 @@ import os
 import sys
 import tempfile
 import shutil
+import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "scripts"))
 os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
 
 from simple_make import detect
 from make_detector import dedup_makes
-from clip_extractor import extract_all
+from clip_extractor import extract_all, concat_clips
 import cv2
 
 st.set_page_config(page_title="Huge Highlights", layout="wide", initial_sidebar_state="collapsed")
@@ -163,13 +164,37 @@ if uploaded_file is not None:
     frames_dir = os.path.join(work_dir, "frames")
 
     try:
-        with st.spinner("Scanning footage for made shots..."):
-            makes, fps = detect(src_path, out_dir=frames_dir, verbose=False)
-            makes = dedup_makes(makes, min_gap_s=7.0)
+        progress_bar = st.progress(0)
+        status_text = st.empty()
+        start_time = time.time()
 
+        def on_progress(done, total):
+            frac = done / total if total else 0.0
+            elapsed = time.time() - start_time
+            eta = (elapsed / done) * (total - done) if done and total else None
+            eta_str = f"{int(eta // 60)}m {int(eta % 60)}s" if eta is not None else "--"
+            progress_bar.progress(min(frac, 1.0))
+            status_text.markdown(
+                f'<div class="status-line">Frame {done:,} / {total:,} '
+                f'({frac * 100:.0f}%) &nbsp;&middot;&nbsp; ETA {eta_str}</div>',
+                unsafe_allow_html=True,
+            )
+
+        makes, fps = detect(src_path, out_dir=frames_dir, verbose=False,
+                            progress_cb=on_progress, target_fps=24)
+        makes = dedup_makes(makes, min_gap_s=7.0)
+        progress_bar.empty()
+        status_text.empty()
+
+        reel_path = None
         if makes:
             with st.spinner(f"Cutting {len(makes)} highlight clip(s)..."):
                 clip_paths = extract_all(src_path, makes, clips_dir, pre=6.0, post=2.5)
+            if len(clip_paths) > 1:
+                with st.spinner("Stitching full highlight reel..."):
+                    reel_path = concat_clips(clip_paths, os.path.join(clips_dir, "highlight_reel.mp4"))
+            else:
+                reel_path = clip_paths[0]
         else:
             clip_paths = []
 
@@ -179,8 +204,20 @@ if uploaded_file is not None:
         with col2:
             st.metric("Video length", f"{(makes[-1]['time'] if makes else 0):.0f}s scanned")
 
+        if makes and reel_path and os.path.exists(reel_path):
+            st.markdown('<div class="section-label">Highlight Reel</div>', unsafe_allow_html=True)
+            st.video(reel_path)
+            with open(reel_path, "rb") as f:
+                st.download_button(
+                    "Download full highlight reel",
+                    data=f.read(),
+                    file_name="huge_highlights_reel.mp4",
+                    mime="video/mp4",
+                    key="dl_reel",
+                )
+
         if makes:
-            st.markdown('<div class="section-label">Highlights</div>', unsafe_allow_html=True)
+            st.markdown('<div class="section-label">Individual Clips</div>', unsafe_allow_html=True)
 
             for i, (make, clip_path) in enumerate(zip(makes, clip_paths), 1):
                 t = make["time"]
