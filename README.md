@@ -1,6 +1,6 @@
-# Made Shot Highlighter
+# Huge Highlights (Made Shot Highlighter)
 
-An AI tool that automatically detects and clips made shots from basketball game footage, so players and coaches don't have to manually scrub through full games to find highlight moments.
+An AI pipeline that takes raw basketball game footage and automatically detects every made shot, then cuts each one into a clip and stitches them into a single highlight reel — no manual scrubbing through hours of film required.
 
 ## The Problem
 
@@ -8,38 +8,43 @@ Building highlight reels or reviewing shooting performance currently means watch
 
 ## My Solution
 
-This project takes in raw basketball game video and outputs a folder of short clips — one per detected made shot. The process works in six steps:
+The system uses two independent detection models rather than one model doing everything:
 
-1. **Dataset** — Start with a labeled dataset of basketball images (ball, rim, and people already marked with bounding boxes).
-2. **Train the detector** — Use this dataset to fine-tune a YOLOv8 object detection model, teaching it to recognize the ball and rim in new video it hasn't seen before.
-3. **Run on game footage** — Feed a full game video into the trained model frame by frame. For each frame, it outputs the exact location of the ball and rim.
-4. **Track the ball over time** — Follow the ball's position across consecutive frames to build a picture of its trajectory.
-5. **Detect a make** — Custom logic checks whether the ball's path passes downward through the rim's location — the pattern that happens when a shot goes in.
-6. **Extract the clip** — When a make is detected, automatically cut a short clip (a few seconds before and after) from the source video and save it separately.
+1. **Ball detector** — a local YOLO model (7 classes: ball, clock, hoop, overlay, player, ref, scoreboard), run on every analyzed frame since ball tracking needs to be fast.
+2. **Rim detector** — a separate RF-DETR model (90.3% mAP), run every 6 frames since rim position changes slowly, with position smoothed between runs.
 
-Repeating this across an entire game produces a folder of ready-to-review highlight clips, without anyone needing to watch the full game.
+Make detection uses geometry, not trajectory prediction: the detected rim box is enlarged into an L-shape — a wide zone above the rim (catching the ball's incoming arc) and a narrow zone below it (only reachable if the ball actually falls through). A shot only counts as made if the ball is detected in the above-zone for several consecutive frames, followed by a genuine detection in the below-zone. This ordering prevents false positives from balls dribbled under the hoop or bounced out to the side.
 
-Training will run in Google Colab (for free GPU access), with the trained model brought into a local Windsurf environment to build the detection and clipping application itself. Testing will begin on the dataset below before validating on self-filmed game footage.
+Processing runs in passes: raw detection → gap interpolation for brief ball occlusions → make-detection logic → clip extraction (ffmpeg) → reel stitching. Frame-skipping and rim-staleness checks keep processing fast enough to run locally on an M4 Pro Mac.
 
 ## Results
 
-*(Update this section once you have real output — e.g. detection accuracy, number of correctly clipped makes out of a test video, or example screenshots in /results.)*
+Validated on an 8-clip test set spanning clean broadcast footage and cluttered highlight-style montage clips:
+
+- **7 of 8** known makes correctly identified, **zero false positives**
+- Correctly rejected a bounce-out (carom) edge case
+- Ball detection accuracy: **~79–87%** on clean broadcast footage, **~59%** on montage-style footage with graphics/replay cuts
+- Rim detection performed reliably across the entire test set
+
+The two missed cases both traced to ball detection failures (a phantom lock onto a stationary broadcast graphic, and a flat camera angle where the ball never rose above the rim in-frame) — confirming ball detection, not rim detection or the make-logic, is the current bottleneck.
 
 ## Repository Structure
-- /code — Notebooks and scripts for training the YOLOv8 detector and running the make/miss clip pipeline
-- /docs — Research paper draft and pitch deck
-- /data — Dataset references (see datasets.md)
-- /results — Screenshots, charts, and example output clips
+- `/code` — Detection scripts (`simple_make.py`, `make_detector.py`), clip extraction (`clip_extractor.py`), pipeline entry point, Streamlit and FastAPI frontends
+- `/docs` — Research paper draft and pitch deck
+- `/data` — Dataset references
+- `/results` — Validation output, thumbnails, example clips
 
 ## Dataset
 
-**Basketball People Rim** — 3,984 images labeled with basketball, people, and rim classes, by QueenMary.
-https://universe.roboflow.com/queenmary/basketball-poeple-rin/browse
+- Basketball Object Detection Model (ball, person, rim) — 9,515 images — https://universe.roboflow.com/cricket-qnb5l/basketball-xil7x/dataset/1
+- Basketball hoop images — 3,630 images, hoop-focused — https://universe.roboflow.com/basketball-hoop-tsdku/basketball-hoop-images/dataset/1
+
+Model weights are excluded from this repo (100MB+, over GitHub's limit) — see `MODELS.md` for download instructions.
 
 ## Project Website
 
-
+*(Add your portfolio site link once published.)*
 
 ## Contact
 
-Hugo — *hugolinnelson@gmail.com*
+Hugo Nelson — *hugolinnelson@gmail.com*
