@@ -340,10 +340,18 @@ def detect(source, weights=DEFAULT_WEIGHTS, conf=0.12, device="mps", out_dir=Non
             above_frames.clear()
             native_frame = frame_no_seq[i]
             t = native_frame / fps
+            # Which basket did this go through? The hoop being attacked sits on
+            # one side of the frame; classify by the rim center's x vs the frame
+            # midline. Within a period each team attacks a fixed basket, so
+            # "left" vs "right" separates the two teams' makes. (Teams switch
+            # ends at halftime, so a full game needs a per-half side->team map.)
+            rim_cx = (rim["left"] + rim["right"]) / 2
+            side = "left" if rim_cx < W / 2 else "right"
             makes.append({"frame": native_frame, "time": t, "zone": zone,
-                          "ball": bb, "rim": rim})
+                          "ball": bb, "rim": rim,
+                          "side": side, "rim_cx": rim_cx, "frame_w": W})
             if verbose:
-                print(f"  MAKE @ frame {native_frame} (t={t:.2f}s)")
+                print(f"  MAKE @ frame {native_frame} (t={t:.2f}s) [{side} basket]")
 
     # ---- Pass 3: re-read only the make frames to save annotated thumbnails ----
     if out_dir and makes:

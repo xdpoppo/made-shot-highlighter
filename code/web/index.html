@@ -6,7 +6,7 @@
 <title>Huge Highlights</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="style.css?v=teams2">
 </head>
 <body>
 
@@ -56,23 +56,43 @@
 
   <section id="results-screen" class="screen">
     <div class="results-header">
-      <div class="stat-row">
-        <div class="stat">
-          <div class="stat-value" id="stat-makes">0</div>
-          <div class="stat-label">Made shots found</div>
+      <div class="summary">
+        <div class="summary-count" id="stat-makes">0</div>
+        <div class="summary-meta">
+          <div class="summary-label">made shots detected</div>
+          <div class="summary-teams" id="summary-teams"></div>
         </div>
       </div>
       <button id="new-video-btn" class="btn-ghost">Analyze another video</button>
     </div>
 
-    <div id="reel-block" class="block hidden">
-      <div class="block-title">Highlight Reel</div>
+    <div id="reel-block" class="reel-hero hidden">
+      <div class="reel-hero-label">Full Highlight Reel</div>
       <video id="reel-video" controls></video>
       <a id="reel-download" class="btn-primary" download>Download full reel</a>
     </div>
 
-    <div id="clips-block" class="block hidden">
-      <div class="block-title">Individual Clips</div>
+    <div id="teams-block" class="teams-bar hidden">
+      <div class="teams-bar-hint">Split by basket &mdash; rename the teams if you like:</div>
+      <div class="teams-inputs">
+        <label class="team-field team-left">
+          <span class="team-dot"></span>
+          <input id="team-left" type="text" placeholder="Team 1" maxlength="24">
+        </label>
+        <label class="team-field team-right">
+          <span class="team-dot"></span>
+          <input id="team-right" type="text" placeholder="Team 2" maxlength="24">
+        </label>
+      </div>
+    </div>
+
+    <div id="team-reels-block" class="hidden">
+      <div class="section-label">By Team</div>
+      <div id="team-reels" class="team-cols"></div>
+    </div>
+
+    <div id="clips-block" class="hidden">
+      <div class="section-label">Clips</div>
       <div id="clips-grid" class="clips-grid"></div>
     </div>
 
@@ -89,6 +109,6 @@
 
 </main>
 
-<script src="app.js"></script>
+<script src="app.js?v=teams2"></script>
 </body>
 </html>

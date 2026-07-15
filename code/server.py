@@ -18,7 +18,7 @@ import threading
 os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "scripts"))
 
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, UploadFile, File, HTTPException, Request
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -31,6 +31,15 @@ JOBS_ROOT = os.path.join(PROJECT_ROOT, "_jobs")
 os.makedirs(JOBS_ROOT, exist_ok=True)
 
 app = FastAPI()
+
+
+@app.middleware("http")
+async def no_cache(request: Request, call_next):
+    # This is an actively-developed local tool; never let the browser cache the
+    # HTML/CSS/JS or we end up debugging a stale UI (as happened during dev).
+    resp = await call_next(request)
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
 
 # job_id -> state dict, mutated by the worker thread and read by /status polls
 jobs = {}
@@ -56,6 +65,7 @@ def _run_job(job_id, src_path):
         job["stage"] = "cutting"
         clip_paths = []
         reel_path = None
+        side_reels = {}
         if makes:
             clip_paths = extract_all(src_path, makes, clips_dir, pre=6.0, post=2.5)
             job["stage"] = "stitching"
@@ -64,9 +74,25 @@ def _run_job(job_id, src_path):
             else:
                 reel_path = clip_paths[0]
 
-        job["makes"] = [{"time": m["time"], "clip": os.path.basename(p)}
-                         for m, p in zip(makes, clip_paths)]
+            # Per-basket reels: group makes by which hoop (left/right) they went
+            # through, so each team's makes can be watched on their own. Only
+            # build a side reel when that side actually has makes.
+            for side in ("left", "right"):
+                side_clips = [p for m, p in zip(makes, clip_paths) if m.get("side") == side]
+                if not side_clips:
+                    continue
+                if len(side_clips) > 1:
+                    out = os.path.join(clips_dir, f"reel_{side}.mp4")
+                    side_reels[side] = os.path.basename(concat_clips(side_clips, out))
+                else:
+                    # single clip on this side: reuse the clip file itself
+                    side_reels[side] = os.path.basename(side_clips[0])
+
+        job["makes"] = [{"time": m["time"], "clip": os.path.basename(p),
+                         "side": m.get("side")}
+                        for m, p in zip(makes, clip_paths)]
         job["reel"] = os.path.basename(reel_path) if reel_path else None
+        job["side_reels"] = side_reels
         job["stage"] = "done"
     except Exception as e:
         job["stage"] = "error"
@@ -85,8 +111,8 @@ async def upload(file: UploadFile = File(...)):
 
     jobs[job_id] = {
         "stage": "queued", "frames_done": 0, "frames_total": None,
-        "makes": [], "reel": None, "error": None, "start_time": None,
-        "work_dir": work_dir,
+        "makes": [], "reel": None, "side_reels": {}, "error": None,
+        "start_time": None, "work_dir": work_dir,
     }
     threading.Thread(target=_run_job, args=(job_id, src_path), daemon=True).start()
     return {"job_id": job_id}
@@ -110,6 +136,7 @@ def status(job_id: str):
         "eta_seconds": eta,
         "makes": job["makes"],
         "reel": job["reel"],
+        "side_reels": job.get("side_reels", {}),
         "error": job["error"],
     }
 
