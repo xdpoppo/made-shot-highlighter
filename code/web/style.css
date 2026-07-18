@@ -317,6 +317,52 @@ main {
   font-size: 0.85rem;
   font-variant-numeric: tabular-nums;
 }
+.clip-badge-row { margin-bottom: 0.6rem; }
+
+.clips-hint {
+  color: var(--text-dim);
+  font-size: 0.86rem;
+  margin: -0.4rem 0 1.1rem 0.2rem;
+  max-width: 60ch;
+  line-height: 1.5;
+}
+
+.clip-actions {
+  display: flex;
+  gap: 0.5rem;
+  align-items: stretch;
+}
+.clip-actions .btn-download-small { flex: 1; }
+.btn-analyze {
+  flex: 1;
+  border: none;
+  border-radius: 8px;
+  background: linear-gradient(135deg, var(--accent-1), var(--accent-2));
+  color: #fff;
+  font-family: inherit;
+  font-size: 0.82rem;
+  font-weight: 600;
+  padding: 0.45rem;
+  cursor: pointer;
+  transition: filter 0.15s ease;
+}
+.btn-analyze:hover:not(:disabled) { filter: brightness(1.08); }
+.btn-analyze:disabled { opacity: 0.6; cursor: default; }
+
+.analysis-slot:not(:empty) { margin-top: 0.9rem; }
+.analysis-label {
+  font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.09em;
+  font-weight: 700; color: var(--accent-1); margin-bottom: 0.5rem;
+}
+.analysis-slot video {
+  width: 100%; border-radius: 9px; background: #000; margin-bottom: 0.6rem;
+}
+.analysis-status {
+  font-size: 0.82rem; color: var(--text-dim); line-height: 1.5;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 8px; padding: 0.7rem 0.85rem;
+}
+.analysis-status.err { color: #ff8f8f; border-color: #5a2a2a; }
 
 /* team / basket-side attribution */
 :root {

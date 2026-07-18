@@ -171,11 +171,11 @@ function renderResults(jobId, data) {
 
   if (hasSides) {
     renderByTeam(sides);
-    document.getElementById("clips-block").classList.add("hidden");
   } else {
     document.getElementById("team-reels-block").classList.add("hidden");
-    renderFlatClips();
   }
+
+  renderClipsGrid();  // individual clips (with Analyze) always shown
 
   showScreen("results");
 }
@@ -221,8 +221,9 @@ function renderByTeam(sides) {
   });
 }
 
-// Fallback when makes carry no side info: a simple flat grid of clips.
-function renderFlatClips() {
+// Individual clips grid — one card per make, each with a Download and an
+// "Analyze" button that runs the 2025 tactical-analysis pipeline on that clip.
+function renderClipsGrid() {
   const { jobId, data } = currentResult;
   const clipsBlock = document.getElementById("clips-block");
   if (!data.makes.length) {
@@ -236,16 +237,70 @@ function renderFlatClips() {
     const url = `/api/file/${jobId}/clips/${m.clip}`;
     const card = document.createElement("div");
     card.className = "clip-card";
+    card.dataset.clip = m.clip;
     card.innerHTML = `
       <div class="clip-card-head">
         <span class="clip-label">Make ${i + 1}</span>
         <span class="clip-time">${fmtTime(m.time)}</span>
       </div>
+      ${m.side ? `<div class="clip-badge-row">${sideBadge(m.side)}</div>` : ""}
       <video controls src="${url}"></video>
-      <a class="btn-download-small" href="${url}" download="huge_highlights_make_${String(i + 1).padStart(2, "0")}.mp4">Download clip</a>
+      <div class="clip-actions">
+        <a class="btn-download-small" href="${url}" download="huge_highlights_make_${String(i + 1).padStart(2, "0")}.mp4">Download</a>
+        <button class="btn-analyze" data-clip="${m.clip}">Analyze</button>
+      </div>
+      <div class="analysis-slot"></div>
     `;
     grid.appendChild(card);
   });
+
+  grid.querySelectorAll(".btn-analyze").forEach((btn) => {
+    btn.addEventListener("click", () => startAnalyze(btn.dataset.clip, btn));
+  });
+}
+
+// Kick off the 2025 analysis for one clip and poll until it finishes.
+function startAnalyze(clip, btn) {
+  const { jobId } = currentResult;
+  const card = btn.closest(".clip-card");
+  const slot = card.querySelector(".analysis-slot");
+  btn.disabled = true;
+  btn.textContent = "Analyzing…";
+  slot.innerHTML = `<div class="analysis-status">Running 2025 tactical analysis — this takes a few minutes on a laptop.</div>`;
+
+  fetch(`/api/analyze/${jobId}/${encodeURIComponent(clip)}`, { method: "POST" })
+    .then((r) => { if (!r.ok) throw new Error(`start failed (${r.status})`); return r.json(); })
+    .then(() => pollAnalyze(clip, btn, slot))
+    .catch((e) => failAnalyze(btn, slot, e.message));
+}
+
+function pollAnalyze(clip, btn, slot) {
+  const { jobId } = currentResult;
+  const timer = setInterval(() => {
+    fetch(`/api/analyze_status/${jobId}/${encodeURIComponent(clip)}`)
+      .then((r) => r.json())
+      .then((s) => {
+        if (s.stage === "done") {
+          clearInterval(timer);
+          const url = `/api/file/${jobId}/clips/${s.output}`;
+          slot.innerHTML = `
+            <div class="analysis-label">2025 Tactical Breakdown</div>
+            <video controls src="${url}"></video>
+            <a class="btn-download-small" href="${url}" download="tactical_${clip}">Download breakdown</a>`;
+          btn.textContent = "Analyzed ✓";
+        } else if (s.stage === "error") {
+          clearInterval(timer);
+          failAnalyze(btn, slot, s.error || "analysis failed");
+        }
+      })
+      .catch((e) => { clearInterval(timer); failAnalyze(btn, slot, e.message); });
+  }, 2500);
+}
+
+function failAnalyze(btn, slot, msg) {
+  btn.disabled = false;
+  btn.textContent = "Analyze";
+  slot.innerHTML = `<div class="analysis-status err">Couldn't analyze: ${msg}</div>`;
 }
 
 // Live re-label when the user types a team name — text only, no video reload
